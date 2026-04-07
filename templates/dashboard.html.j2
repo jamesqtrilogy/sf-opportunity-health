@@ -1,0 +1,744 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Renewal Health Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+:root {
+  --bg: #f0f4f8; --card: #ffffff; --header: #0f1c2e;
+  --healthy: #16a34a; --caution: #d97706; --atrisk: #dc2626;
+  --win: #16a34a; --churn: #dc2626; --undet: #94a3b8;
+  --accent: #2563eb; --text: #1e293b; --muted: #64748b;
+  --border: #e2e8f0; --r: 10px; --gap: 16px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); font-size: 14px; }
+
+/* Header */
+.header {
+  background: var(--header); color: #fff; padding: 14px 24px;
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+}
+.header h1 { font-size: 18px; font-weight: 700; white-space: nowrap; margin-right: 8px; }
+.header .gen-date { font-size: 12px; color: #94a3b8; white-space: nowrap; }
+.filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-left: auto; }
+.filters select {
+  background: #1e3a5f; color: #e2e8f0; border: 1px solid #334155;
+  border-radius: 6px; padding: 5px 10px; font-size: 13px; cursor: pointer;
+}
+.filters select:focus { outline: none; border-color: var(--accent); }
+.btn-reset {
+  background: #334155; color: #e2e8f0; border: none; border-radius: 6px;
+  padding: 5px 12px; font-size: 13px; cursor: pointer; white-space: nowrap;
+}
+.btn-reset:hover { background: #475569; }
+
+/* Layout */
+.main { padding: var(--gap); max-width: 1600px; margin: 0 auto; }
+
+/* KPI Cards */
+.kpi-row { display: grid; grid-template-columns: repeat(8, 1fr); gap: var(--gap); margin-bottom: var(--gap); }
+@media (max-width: 1200px) { .kpi-row { grid-template-columns: repeat(4, 1fr); } }
+@media (max-width: 700px)  { .kpi-row { grid-template-columns: repeat(2, 1fr); } }
+.kpi-card {
+  background: var(--card); border-radius: var(--r); padding: 16px 14px;
+  border: 1px solid var(--border); text-align: center;
+}
+.kpi-card .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 6px; }
+.kpi-card .value { font-size: 22px; font-weight: 700; }
+.kpi-card .sub   { font-size: 11px; color: var(--muted); margin-top: 4px; }
+.c-blue   { color: var(--accent); }
+.c-green  { color: var(--healthy); }
+.c-red    { color: var(--atrisk); }
+.c-amber  { color: var(--caution); }
+
+/* Chart rows */
+.chart-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap); margin-bottom: var(--gap); }
+@media (max-width: 900px) { .chart-row { grid-template-columns: 1fr; } }
+.chart-card {
+  background: var(--card); border-radius: var(--r); padding: 18px;
+  border: 1px solid var(--border);
+}
+.chart-card h3 { font-size: 13px; font-weight: 600; margin-bottom: 14px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.chart-wrap { position: relative; height: 240px; }
+.chart-wrap-tall { position: relative; height: 300px; }
+
+/* Flag strip */
+.flag-strip { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: var(--gap); }
+.flag-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 12px; border-radius: 20px; font-size: 12px; font-weight: 600;
+}
+.flag-amber { background: #fef3c7; color: #92400e; border: 1px solid #f59e0b; }
+.flag-red   { background: #fee2e2; color: #b91c1c; border: 1px solid #dc2626; }
+
+/* Table */
+.table-card { background: var(--card); border-radius: var(--r); border: 1px solid var(--border); overflow: hidden; margin-bottom: var(--gap); }
+.table-card h3 { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; padding: 16px 18px 0; }
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+thead th {
+  background: #f8fafc; padding: 10px 10px; text-align: left;
+  font-size: 11px; color: var(--muted); text-transform: uppercase;
+  letter-spacing: .04em; border-bottom: 1px solid var(--border);
+  white-space: nowrap; cursor: pointer; user-select: none;
+}
+thead th:hover { background: #f1f5f9; color: var(--text); }
+thead th.sorted-asc::after  { content: " \25B2"; }
+thead th.sorted-desc::after { content: " \25BC"; }
+tbody tr { border-bottom: 1px solid var(--border); }
+tbody tr:last-child { border-bottom: none; }
+tbody tr:hover { background: #f8fafc; }
+td { padding: 8px 10px; white-space: nowrap; }
+.score-cell {
+  font-weight: 700; text-align: center; border-radius: 4px;
+  padding: 3px 7px; display: inline-block; min-width: 38px;
+}
+.score-healthy { background: #dcfce7; color: #15803d; }
+.score-caution { background: #fef3c7; color: #92400e; }
+.score-atrisk  { background: #fee2e2; color: #b91c1c; }
+.band-badge {
+  display: inline-block; padding: 2px 8px; border-radius: 10px;
+  font-weight: 600; font-size: 11px;
+}
+.band-Healthy { background: #dcfce7; color: #15803d; }
+.band-Caution { background: #fef3c7; color: #92400e; }
+.band-AtRisk  { background: #fee2e2; color: #b91c1c; }
+.renewal-chip { display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: 11px; font-weight: 600; margin-left: 4px; }
+.renewal-overdue { background: #fee2e2; color: #b91c1c; }
+.renewal-urgent  { background: #ffedd5; color: #9a3412; }
+.renewal-near    { background: #fef3c7; color: #92400e; }
+.renewal-ok      { background: #dcfce7; color: #15803d; }
+.auto-yes { color: var(--healthy); font-weight: 700; }
+.auto-no  { color: var(--atrisk); font-weight: 700; }
+.churn-set { color: var(--atrisk); font-weight: 600; font-size: 11px; max-width: 120px; overflow: hidden; text-overflow: ellipsis; display: inline-block; }
+
+/* Footer */
+.footer {
+  text-align: center; padding: 16px; color: var(--muted); font-size: 12px;
+  border-top: 1px solid var(--border); background: var(--card); margin-top: var(--gap);
+}
+
+/* No results */
+.no-results { text-align: center; padding: 40px; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <h1>Renewal Health Dashboard</h1>
+  <span class="gen-date">{{ generated_at }}</span>
+  <div class="filters">
+    <select id="f-stage"><option value="">All Stages</option></select>
+    <select id="f-owner"><option value="">All Owners</option></select>
+    <select id="f-product"><option value="">All Products</option></select>
+    <select id="f-outcome"><option value="">All Outcomes</option></select>
+    <select id="f-band"><option value="">All Bands</option></select>
+    <select id="f-status"><option value="">All Statuses</option></select>
+    <button class="btn-reset" onclick="resetFilters()">&#10005; Reset</button>
+  </div>
+</div>
+
+<div class="main">
+
+  <!-- KPI Cards -->
+  <div class="kpi-row" id="kpi-cards">
+    <div class="kpi-card">
+      <div class="label">Total Pipeline ARR</div>
+      <div class="value c-blue" id="kpi-arr">—</div>
+    </div>
+    <div class="kpi-card">
+      <div class="label">Avg Health Score</div>
+      <div class="value" id="kpi-health">—</div>
+    </div>
+    <div class="kpi-card">
+      <div class="label">Likely to Win ARR</div>
+      <div class="value c-green" id="kpi-win-arr">—</div>
+    </div>
+    <div class="kpi-card">
+      <div class="label">Likely to Churn ARR</div>
+      <div class="value c-red" id="kpi-churn-arr">—</div>
+    </div>
+    <div class="kpi-card">
+      <div class="label">At Risk ARR</div>
+      <div class="value c-red" id="kpi-atrisk-arr">—</div>
+    </div>
+    <div class="kpi-card">
+      <div class="label">No Auto-Renewal ARR</div>
+      <div class="value c-amber" id="kpi-noauto-arr">—</div>
+    </div>
+    <div class="kpi-card">
+      <div class="label">Churn Risk Flagged</div>
+      <div class="value" id="kpi-churn-flag">—</div>
+    </div>
+    <div class="kpi-card">
+      <div class="label">Data Confidence</div>
+      <div class="value" id="kpi-confidence">—</div>
+    </div>
+  </div>
+
+  <!-- Charts Row 1: Outcome doughnut + Health band doughnut -->
+  <div class="chart-row">
+    <div class="chart-card">
+      <h3>ARR by Probable Outcome</h3>
+      <div class="chart-wrap"><canvas id="chart-outcome"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <h3>ARR by Health Band</h3>
+      <div class="chart-wrap"><canvas id="chart-band"></canvas></div>
+    </div>
+  </div>
+
+  <!-- Charts Row 2: Renewal timeline + Domain radar -->
+  <div class="chart-row">
+    <div class="chart-card">
+      <h3>ARR by Renewal Timeline</h3>
+      <div class="chart-wrap"><canvas id="chart-renewal"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <h3>Domain Score Averages</h3>
+      <div class="chart-wrap"><canvas id="chart-radar"></canvas></div>
+    </div>
+  </div>
+
+  <!-- Charts Row 3: Status breakdown + Owner stacked bar -->
+  <div class="chart-row">
+    <div class="chart-card">
+      <h3>ARR by Opportunity Status</h3>
+      <div class="chart-wrap"><canvas id="chart-status"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <h3>Opportunities by Owner (Top 10)</h3>
+      <div class="chart-wrap-tall"><canvas id="chart-owner"></canvas></div>
+    </div>
+  </div>
+
+  <!-- Flag Strip -->
+  <div class="flag-strip" id="flag-strip"></div>
+
+  <!-- Opportunity Table -->
+  <div class="table-card">
+    <h3>Opportunities <span id="table-count" style="color:var(--muted);font-weight:400"></span></h3>
+    <div class="table-wrap">
+      <table id="opp-table">
+        <thead>
+          <tr>
+            <th data-col="Account.Name">Account</th>
+            <th data-col="Owner.Name">Owner</th>
+            <th data-col="Product__c">Product</th>
+            <th data-col="StageName">Stage</th>
+            <th data-col="Opportunity_Status__c">Status</th>
+            <th data-col="Probable_Outcome__c">Outcome</th>
+            <th data-col="health_score">Health</th>
+            <th data-col="health_band">Band</th>
+            <th data-col="engagement_score">Eng</th>
+            <th data-col="renewal_score">Ren</th>
+            <th data-col="commercial_score">Com</th>
+            <th data-col="risk_score">Risk</th>
+            <th data-col="ARR__c">ARR</th>
+            <th data-col="Renewal_Date__c">Renewal Date</th>
+            <th data-col="CurrentContractHasAutoRenewalClause__c">Auto-Renew</th>
+            <th data-col="Churn_Risks__c">Churn Risk</th>
+            <th data-col="data_confidence">Conf</th>
+          </tr>
+        </thead>
+        <tbody id="opp-tbody"></tbody>
+      </table>
+      <div class="no-results" id="no-results" style="display:none">No matching opportunities</div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Footer -->
+<div class="footer" id="footer-bar">
+  Generated by sf-opportunity-health &middot; {{ generated_at }} &middot;
+  {{ kpis.total_count }} opportunities &middot;
+  Avg health: {{ kpis.avg_health_score }} &middot;
+  Data confidence: {{ "%.0f"|format(kpis.avg_data_confidence * 100) }}%
+</div>
+
+<script>
+// ── Data ─────────────────────────────────────────────────────────────────────
+const ALL_OPPS = {{ opps_json }};
+const BASE_KPIS = {{ kpis_json }};
+
+// ── Utilities ─────────────────────────────────────────────────────────────────
+const fmtArr = v => v == null ? '$0' : '$' + Math.round(v).toLocaleString();
+const fmtPct = v => v == null ? '0%' : Math.round(v * 100) + '%';
+
+function scoreClass(v) {
+  if (v == null) return '';
+  if (v >= 80) return 'score-healthy';
+  if (v >= 50) return 'score-caution';
+  return 'score-atrisk';
+}
+
+function scoreCell(v) {
+  if (v == null) return '<span class="score-cell">—</span>';
+  return `<span class="score-cell ${scoreClass(v)}">${v.toFixed(1)}</span>`;
+}
+
+function bandBadge(b) {
+  const cls = b === 'At Risk' ? 'band-AtRisk' : 'band-' + b;
+  return `<span class="band-badge ${cls}">${b || '—'}</span>`;
+}
+
+function renewalChip(dateStr, days) {
+  if (!dateStr) return '<span style="color:var(--muted)">—</span>';
+  const d = new Date(dateStr);
+  const label = d.toLocaleDateString('en-GB', {day:'2-digit',month:'short',year:'numeric'});
+  if (days == null) return label;
+  let cls = 'renewal-ok', txt = days + 'd';
+  if (days < 0)   { cls = 'renewal-overdue'; txt = Math.abs(days) + 'd overdue'; }
+  else if (days <= 30)  { cls = 'renewal-urgent'; txt = days + 'd'; }
+  else if (days <= 90)  { cls = 'renewal-near';   txt = days + 'd'; }
+  return `${label} <span class="renewal-chip ${cls}">${txt}</span>`;
+}
+
+function healthColor(v) {
+  if (v >= 80) return 'var(--healthy)';
+  if (v >= 50) return 'var(--caution)';
+  return 'var(--atrisk)';
+}
+
+// ── Filters ───────────────────────────────────────────────────────────────────
+function getFilters() {
+  return {
+    stage:   document.getElementById('f-stage').value,
+    owner:   document.getElementById('f-owner').value,
+    product: document.getElementById('f-product').value,
+    outcome: document.getElementById('f-outcome').value,
+    band:    document.getElementById('f-band').value,
+    status:  document.getElementById('f-status').value,
+  };
+}
+
+function applyFilters(opps, f) {
+  return opps.filter(r =>
+    (!f.stage   || r['StageName']               === f.stage)   &&
+    (!f.owner   || r['Owner.Name']              === f.owner)   &&
+    (!f.product || r['Product__c']              === f.product) &&
+    (!f.outcome || r['Probable_Outcome__c']     === f.outcome) &&
+    (!f.band    || r['health_band']             === f.band)    &&
+    (!f.status  || r['Opportunity_Status__c']   === f.status)
+  );
+}
+
+function populateFilter(id, field, opps) {
+  const sel = document.getElementById(id);
+  const cur = sel.value;
+  const vals = [...new Set(opps.map(r => r[field]).filter(Boolean))].sort();
+  // Keep first option
+  while (sel.options.length > 1) sel.remove(1);
+  vals.forEach(v => {
+    const o = document.createElement('option');
+    o.value = o.text = v;
+    if (v === cur) o.selected = true;
+    sel.add(o);
+  });
+}
+
+function buildFilters() {
+  populateFilter('f-stage',   'StageName',             ALL_OPPS);
+  populateFilter('f-owner',   'Owner.Name',            ALL_OPPS);
+  populateFilter('f-product', 'Product__c',            ALL_OPPS);
+  populateFilter('f-outcome', 'Probable_Outcome__c',   ALL_OPPS);
+  populateFilter('f-band',    'health_band',           ALL_OPPS);
+  populateFilter('f-status',  'Opportunity_Status__c', ALL_OPPS);
+}
+
+function resetFilters() {
+  ['f-stage','f-owner','f-product','f-outcome','f-band','f-status']
+    .forEach(id => document.getElementById(id).value = '');
+  render();
+}
+
+// ── KPI re-compute ────────────────────────────────────────────────────────────
+function recomputeKpis(opps) {
+  const arr = r => parseFloat(r['ARR__c'] || 0);
+  const total_count = opps.length;
+  const total_arr   = opps.reduce((s,r) => s + arr(r), 0);
+  const band_dist   = {'Healthy':{arr:0,count:0},'Caution':{arr:0,count:0},'At Risk':{arr:0,count:0}};
+  opps.forEach(r => {
+    const b = r['health_band'] || 'Caution';
+    if (band_dist[b]) { band_dist[b].arr += arr(r); band_dist[b].count++; }
+  });
+
+  const outcome = {};
+  opps.forEach(r => {
+    const o = r['Probable_Outcome__c'] || 'Undetermined';
+    if (!outcome[o]) outcome[o] = {arr:0,count:0};
+    outcome[o].arr += arr(r); outcome[o].count++;
+  });
+
+  const status_kpis = {};
+  opps.forEach(r => {
+    const s = r['Opportunity_Status__c'] || 'Unknown';
+    if (!status_kpis[s]) status_kpis[s] = {arr:0,count:0};
+    status_kpis[s].arr += arr(r); status_kpis[s].count++;
+  });
+
+  const renewal_timeline = {};
+  opps.forEach(r => {
+    const days = r['days_to_renewal'];
+    let bucket;
+    if (days == null)     bucket = 'Unknown';
+    else if (days < 0)    bucket = 'Overdue';
+    else if (days <= 30)  bucket = '0-30d';
+    else if (days <= 90)  bucket = '31-90d';
+    else if (days <= 180) bucket = '91-180d';
+    else                  bucket = '180d+';
+    if (!renewal_timeline[bucket]) renewal_timeline[bucket] = {arr:0,count:0};
+    renewal_timeline[bucket].arr += arr(r);
+    renewal_timeline[bucket].count++;
+  });
+
+  const today = new Date(); today.setHours(0,0,0,0);
+  const parseDate = s => { if (!s) return null; const d = new Date(s); return isNaN(d) ? null : d; };
+
+  return {
+    total_count, total_arr,
+    band_distribution: band_dist,
+    avg_health_score:  total_count ? opps.reduce((s,r)=>s+(r['health_score']||0),0)/total_count : 0,
+    avg_data_confidence: total_count ? opps.reduce((s,r)=>s+(r['data_confidence']||0),0)/total_count : 0,
+    at_risk_arr:   band_dist['At Risk'].arr,
+    at_risk_count: band_dist['At Risk'].count,
+    likely_win_arr:     (outcome['Likely to Win']   || {arr:0}).arr,
+    likely_win_count:   (outcome['Likely to Win']   || {count:0}).count,
+    likely_churn_arr:   (outcome['Likely to Churn'] || {arr:0}).arr,
+    likely_churn_count: (outcome['Likely to Churn'] || {count:0}).count,
+    undetermined_arr:   (outcome['Undetermined']    || {arr:0}).arr,
+    undetermined_count: (outcome['Undetermined']    || {count:0}).count,
+    status_kpis,
+    renewal_timeline,
+    no_follow_up_set:     opps.filter(r => !r['Next_Follow_Up_Date__c']).length,
+    overdue_follow_ups:   opps.filter(r => { const d=parseDate(r['Next_Follow_Up_Date__c']); return d && d < today; }).length,
+    stale_activity:       opps.filter(r => { const d=parseDate(r['LastActivityDate']); return !d || (today-d)/864e5>30; }).length,
+    churn_risk_flagged:   opps.filter(r => (r['Churn_Risks__c']||'').trim()).length,
+    no_auto_renewal_arr:  opps.filter(r=>!r['CurrentContractHasAutoRenewalClause__c']).reduce((s,r)=>s+arr(r),0),
+    no_auto_renewal_count:opps.filter(r=>!r['CurrentContractHasAutoRenewalClause__c']).length,
+    flat_or_declining_arr:opps.filter(r=>(r['ARR_Increase__c']||0)<=0).reduce((s,r)=>s+arr(r),0),
+    avg_domain_scores: {
+      engagement: total_count ? opps.reduce((s,r)=>s+(r['engagement_score']||0),0)/total_count : 0,
+      renewal:    total_count ? opps.reduce((s,r)=>s+(r['renewal_score']||0),0)/total_count : 0,
+      commercial: total_count ? opps.reduce((s,r)=>s+(r['commercial_score']||0),0)/total_count : 0,
+      risk:       total_count ? opps.reduce((s,r)=>s+(r['risk_score']||0),0)/total_count : 0,
+    },
+  };
+}
+
+// ── Charts ────────────────────────────────────────────────────────────────────
+const charts = {};
+
+function initChart(id, config) {
+  const ctx = document.getElementById(id).getContext('2d');
+  charts[id] = new Chart(ctx, config);
+}
+
+function updateChart(id, labels, datasets) {
+  const ch = charts[id];
+  ch.data.labels = labels;
+  ch.data.datasets = datasets;
+  ch.update();
+}
+
+function initCharts() {
+  const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+
+  // Outcome doughnut
+  initChart('chart-outcome', {
+    type: 'doughnut',
+    data: { labels: [], datasets: [{ data: [], backgroundColor: [css('--win'), css('--churn'), css('--undet')], borderWidth: 2 }] },
+    options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'bottom' } } }
+  });
+
+  // Band doughnut
+  initChart('chart-band', {
+    type: 'doughnut',
+    data: { labels: [], datasets: [{ data: [], backgroundColor: [css('--healthy'), css('--caution'), css('--atrisk')], borderWidth: 2 }] },
+    options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'bottom' } } }
+  });
+
+  // Renewal timeline horizontal bar
+  initChart('chart-renewal', {
+    type: 'bar',
+    data: { labels: [], datasets: [{ label:'ARR', data: [], backgroundColor: [] }] },
+    options: {
+      indexAxis: 'y', responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{ display:false } },
+      scales:{ x:{ ticks:{ callback: v => '$'+Math.round(v/1000)+'k' } } }
+    }
+  });
+
+  // Domain radar
+  initChart('chart-radar', {
+    type: 'radar',
+    data: {
+      labels: ['Engagement (35%)', 'Renewal (30%)', 'Commercial (20%)', 'Risk (15%)'],
+      datasets: [{
+        label: 'Avg Score', data: [0,0,0,0],
+        fill: true,
+        backgroundColor: 'rgba(37,99,235,0.2)',
+        borderColor: '#2563eb',
+        pointBackgroundColor: '#2563eb',
+      }]
+    },
+    options: {
+      responsive:true, maintainAspectRatio:false,
+      scales:{ r:{ min:0, max:100, ticks:{ stepSize:25 } } },
+      plugins:{ legend:{ display:false } }
+    }
+  });
+
+  // Status horizontal bar
+  initChart('chart-status', {
+    type: 'bar',
+    data: { labels: [], datasets: [{ label:'ARR', data:[], backgroundColor:[] }] },
+    options: {
+      indexAxis: 'y', responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{ display:false } },
+      scales:{ x:{ ticks:{ callback: v => '$'+Math.round(v/1000)+'k' } } }
+    }
+  });
+
+  // Owner stacked bar
+  initChart('chart-owner', {
+    type: 'bar',
+    data: {
+      labels: [],
+      datasets: [
+        { label:'Healthy', data:[], backgroundColor:'#16a34a' },
+        { label:'Caution', data:[], backgroundColor:'#d97706' },
+        { label:'At Risk', data:[], backgroundColor:'#dc2626' },
+      ]
+    },
+    options: {
+      indexAxis: 'y', responsive:true, maintainAspectRatio:false,
+      scales:{ x:{ stacked:true }, y:{ stacked:true } },
+      plugins:{ legend:{ position:'bottom' } }
+    }
+  });
+}
+
+function updateCharts(opps, kpis) {
+  // Outcome doughnut
+  updateChart('chart-outcome',
+    ['Likely to Win', 'Likely to Churn', 'Undetermined'],
+    [{ data: [kpis.likely_win_arr, kpis.likely_churn_arr, kpis.undetermined_arr],
+       backgroundColor: ['#16a34a','#dc2626','#94a3b8'], borderWidth:2 }]
+  );
+
+  // Band doughnut
+  const bd = kpis.band_distribution;
+  updateChart('chart-band',
+    ['Healthy', 'Caution', 'At Risk'],
+    [{ data: [(bd['Healthy']||{arr:0}).arr, (bd['Caution']||{arr:0}).arr, (bd['At Risk']||{arr:0}).arr],
+       backgroundColor: ['#16a34a','#d97706','#dc2626'], borderWidth:2 }]
+  );
+
+  // Renewal timeline
+  const rtBuckets  = ['Overdue','0-30d','31-90d','91-180d','180d+'];
+  const rtColors   = ['#dc2626','#f97316','#d97706','#2563eb','#16a34a'];
+  const rt = kpis.renewal_timeline || {};
+  updateChart('chart-renewal',
+    rtBuckets,
+    [{ label:'ARR', data: rtBuckets.map(b=>(rt[b]||{arr:0}).arr), backgroundColor: rtColors }]
+  );
+
+  // Radar
+  const ds = kpis.avg_domain_scores || {};
+  charts['chart-radar'].data.datasets[0].data = [
+    ds.engagement||0, ds.renewal||0, ds.commercial||0, ds.risk||0
+  ];
+  charts['chart-radar'].update();
+
+  // Status bar
+  const statusOrder = ['On Track','Warning','Attention Required'];
+  const statusColors = { 'On Track':'#16a34a', 'Warning':'#d97706', 'Attention Required':'#dc2626' };
+  const sk = kpis.status_kpis || {};
+  const allStatuses = [...new Set([...statusOrder, ...Object.keys(sk)])];
+  updateChart('chart-status',
+    allStatuses,
+    [{ label:'ARR', data: allStatuses.map(s=>(sk[s]||{arr:0}).arr),
+       backgroundColor: allStatuses.map(s=>statusColors[s]||'#94a3b8') }]
+  );
+
+  // Owner stacked bar
+  const ownerBands = {};
+  opps.forEach(r => {
+    const o = r['Owner.Name'] || 'Unknown';
+    const b = r['health_band'] || 'Caution';
+    if (!ownerBands[o]) ownerBands[o] = {Healthy:0,Caution:0,'At Risk':0};
+    ownerBands[o][b] = (ownerBands[o][b]||0) + 1;
+  });
+  const ownerTotals = Object.entries(ownerBands).map(([o,v])=>({o,t:v.Healthy+v.Caution+v['At Risk']}));
+  ownerTotals.sort((a,b)=>b.t-a.t);
+  const top10 = ownerTotals.slice(0,10).map(x=>x.o);
+  charts['chart-owner'].data.labels = top10;
+  charts['chart-owner'].data.datasets[0].data = top10.map(o=>ownerBands[o].Healthy||0);
+  charts['chart-owner'].data.datasets[1].data = top10.map(o=>ownerBands[o].Caution||0);
+  charts['chart-owner'].data.datasets[2].data = top10.map(o=>ownerBands[o]['At Risk']||0);
+  charts['chart-owner'].update();
+}
+
+// ── KPI Cards ─────────────────────────────────────────────────────────────────
+function updateKpiCards(kpis) {
+  document.getElementById('kpi-arr').textContent = fmtArr(kpis.total_arr);
+
+  const hs = kpis.avg_health_score || 0;
+  const hsEl = document.getElementById('kpi-health');
+  hsEl.textContent = hs.toFixed(1);
+  hsEl.style.color = healthColor(hs);
+
+  document.getElementById('kpi-win-arr').textContent   = fmtArr(kpis.likely_win_arr||0);
+  document.getElementById('kpi-churn-arr').textContent  = fmtArr(kpis.likely_churn_arr||0);
+  document.getElementById('kpi-atrisk-arr').textContent = fmtArr(kpis.at_risk_arr||0);
+  document.getElementById('kpi-noauto-arr').textContent = fmtArr(kpis.no_auto_renewal_arr||0);
+
+  const cf = kpis.churn_risk_flagged || 0;
+  const cfEl = document.getElementById('kpi-churn-flag');
+  cfEl.textContent  = cf;
+  cfEl.style.color  = cf > 0 ? 'var(--caution)' : 'var(--text)';
+
+  const conf = kpis.avg_data_confidence || 0;
+  const confEl = document.getElementById('kpi-confidence');
+  confEl.textContent = fmtPct(conf);
+  confEl.style.color = conf < 0.7 ? 'var(--caution)' : 'var(--healthy)';
+}
+
+// ── Flag Strip ────────────────────────────────────────────────────────────────
+function updateFlags(kpis) {
+  const rt = kpis.renewal_timeline || {};
+  const sk = kpis.status_kpis || {};
+  const overdue = (rt['Overdue']||{count:0}).count;
+  const attn    = (sk['Attention Required']||{count:0}).count;
+
+  const flags = [
+    { val: overdue,                      cls:'flag-red',   label:`${overdue} renewal${overdue!==1?'s':''} overdue` },
+    { val: attn,                         cls:'flag-red',   label:`${attn} Attention Required` },
+    { val: kpis.churn_risk_flagged,      cls:'flag-amber', label:`${kpis.churn_risk_flagged} churn risk${kpis.churn_risk_flagged!==1?'s':''} flagged` },
+    { val: kpis.no_follow_up_set,        cls:'flag-amber', label:`${kpis.no_follow_up_set} no follow-up set` },
+    { val: kpis.overdue_follow_ups,      cls:'flag-amber', label:`${kpis.overdue_follow_ups} overdue follow-up${kpis.overdue_follow_ups!==1?'s':''}` },
+    { val: kpis.stale_activity,          cls:'flag-amber', label:`${kpis.stale_activity} stale activity >30 days` },
+    { val: kpis.no_auto_renewal_arr,     cls:'flag-amber', label:`${fmtArr(kpis.no_auto_renewal_arr)} ARR without auto-renewal` },
+    { val: kpis.flat_or_declining_arr,   cls:'flag-amber', label:`${fmtArr(kpis.flat_or_declining_arr)} flat/declining ARR` },
+  ];
+
+  const strip = document.getElementById('flag-strip');
+  strip.innerHTML = '';
+  flags.filter(f => f.val > 0).forEach(f => {
+    const chip = document.createElement('div');
+    chip.className = `flag-chip ${f.cls}`;
+    chip.innerHTML = `<span>&#9888;</span> ${f.label}`;
+    strip.appendChild(chip);
+  });
+}
+
+// ── Table ─────────────────────────────────────────────────────────────────────
+let sortCol = 'health_score', sortDir = 1;
+
+function renderTable(opps) {
+  const tbody = document.getElementById('opp-tbody');
+  const noRes = document.getElementById('no-results');
+  const count = document.getElementById('table-count');
+
+  const display = opps.slice(0, 300);
+  count.textContent = `(${opps.length} shown${opps.length > 300 ? ', capped at 300' : ''})`;
+
+  if (display.length === 0) {
+    tbody.innerHTML = '';
+    noRes.style.display = '';
+    return;
+  }
+  noRes.style.display = 'none';
+
+  tbody.innerHTML = display.map(r => {
+    const autoRenew = r['CurrentContractHasAutoRenewalClause__c'];
+    const autoHtml  = autoRenew === true  ? '<span class="auto-yes">Yes</span>'
+                    : autoRenew === false ? '<span class="auto-no">No</span>'
+                    : '<span style="color:var(--muted)">—</span>';
+    const churn = (r['Churn_Risks__c'] || '').trim();
+    const churnHtml = churn ? `<span class="churn-set" title="${churn}">${churn}</span>` : '<span style="color:var(--muted)">—</span>';
+
+    return `<tr>
+      <td title="${r['Name']||''}">${r['Account.Name']||r['Name']||'—'}</td>
+      <td>${r['Owner.Name']||'—'}</td>
+      <td>${r['Product__c']||'—'}</td>
+      <td>${r['StageName']||'—'}</td>
+      <td>${r['Opportunity_Status__c']||'—'}</td>
+      <td>${r['Probable_Outcome__c']||'—'}</td>
+      <td style="text-align:center">${scoreCell(r['health_score'])}</td>
+      <td>${bandBadge(r['health_band'])}</td>
+      <td style="text-align:center">${scoreCell(r['engagement_score'])}</td>
+      <td style="text-align:center">${scoreCell(r['renewal_score'])}</td>
+      <td style="text-align:center">${scoreCell(r['commercial_score'])}</td>
+      <td style="text-align:center">${scoreCell(r['risk_score'])}</td>
+      <td style="text-align:right">${fmtArr(r['ARR__c'])}</td>
+      <td>${renewalChip(r['Renewal_Date__c'], r['days_to_renewal'])}</td>
+      <td style="text-align:center">${autoHtml}</td>
+      <td>${churnHtml}</td>
+      <td style="text-align:center">${fmtPct(r['data_confidence'])}</td>
+    </tr>`;
+  }).join('');
+}
+
+function sortTable(opps) {
+  return [...opps].sort((a, b) => {
+    let av = a[sortCol], bv = b[sortCol];
+    if (av == null) av = sortDir > 0 ? Infinity : -Infinity;
+    if (bv == null) bv = sortDir > 0 ? Infinity : -Infinity;
+    if (typeof av === 'string') return av.localeCompare(bv) * sortDir;
+    return (av - bv) * sortDir;
+  });
+}
+
+function updateSortHeaders() {
+  document.querySelectorAll('thead th').forEach(th => {
+    th.classList.remove('sorted-asc','sorted-desc');
+    if (th.dataset.col === sortCol)
+      th.classList.add(sortDir > 0 ? 'sorted-asc' : 'sorted-desc');
+  });
+}
+
+// ── Main render ───────────────────────────────────────────────────────────────
+function render() {
+  const f = getFilters();
+  const filtered = applyFilters(ALL_OPPS, f);
+  const kpis = recomputeKpis(filtered);
+  updateKpiCards(kpis);
+  updateCharts(filtered, kpis);
+  updateFlags(kpis);
+  const sorted = sortTable(filtered);
+  renderTable(sorted);
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  buildFilters();
+  initCharts();
+
+  // Filter change listeners
+  ['f-stage','f-owner','f-product','f-outcome','f-band','f-status']
+    .forEach(id => document.getElementById(id).addEventListener('change', render));
+
+  // Sort listeners
+  document.querySelectorAll('thead th[data-col]').forEach(th => {
+    th.addEventListener('click', () => {
+      const col = th.dataset.col;
+      if (sortCol === col) sortDir *= -1;
+      else { sortCol = col; sortDir = col === 'health_score' ? 1 : 1; }
+      updateSortHeaders();
+      render();
+    });
+  });
+
+  updateSortHeaders();
+  render();
+});
+</script>
+</body>
+</html>
