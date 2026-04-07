@@ -263,8 +263,8 @@ td { padding: 8px 10px; white-space: nowrap; }
 
 <script>
 // ── Data ─────────────────────────────────────────────────────────────────────
-const ALL_OPPS = {{ opps_json }};
-const BASE_KPIS = {{ kpis_json }};
+const ALL_OPPS = {{ opps_json | safe }};
+const BASE_KPIS = {{ kpis_json | safe }};
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
 const fmtArr = v => v == null ? '$0' : '$' + Math.round(v).toLocaleString();
