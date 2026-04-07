@@ -303,7 +303,7 @@ def score_renewal(record: dict) -> DomainScore:
         "Quote Follow-Up": 65,
         "Proposal":        50,
         "Engaged":         35,
-        "Outreach":        20,
+        "Outreached":      20,
         "Closed Lost":      0,
     }
     s = stage_scores.get(stage, 40) if stage else 40

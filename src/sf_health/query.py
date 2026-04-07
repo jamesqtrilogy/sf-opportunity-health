@@ -41,6 +41,8 @@ SELECT
   Opportunity_Report__c
 FROM Opportunity
 WHERE IsClosed = false
+  AND StageName IN ('Outreached', 'Engaged', 'Proposal', 'Quote Follow-Up')
+  AND Renewal_Date__c >= 2026-01-01
 ORDER BY Renewal_Date__c ASC NULLS LAST
 """.strip()
 
