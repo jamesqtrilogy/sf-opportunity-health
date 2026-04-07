@@ -399,27 +399,20 @@ def score_commercial(record: dict) -> DomainScore:
 def score_risk(record: dict) -> DomainScore:
     """Score Risk signals (15% of composite).
 
-    Signals: churn_risk_text, late_payment_status, commitment_signal.
+    Signals: late_payment_status, commitment_signal.
+    (Churn_Risks__c is retained for display only — not scored.)
     """
     signals: list[SubScore] = []
 
-    # 4.4a -- Churn risk text (45%)
-    churn = _get(record, "churn_risks")
-    if churn is None or str(churn).strip() == "":
-        s = 100
-    else:
-        s = 15
-    signals.append(SubScore("churn_risk_text", churn, s, 0.45, s * 0.45))
-
-    # 4.4b -- Late payment status (30%)
+    # 4.4a -- Late payment status (55%)
     late = _get(record, "late_status")
     if late is None or str(late).strip() == "":
         s = 100
     else:
         s = 0
-    signals.append(SubScore("late_payment_status", late, s, 0.30, s * 0.30))
+    signals.append(SubScore("late_payment_status", late, s, 0.55, s * 0.55))
 
-    # 4.4c -- Commitment signal (25%)
+    # 4.4b -- Commitment signal (45%)
     win_type = _get(record, "win_type")
     if win_type is None:
         s = 40
@@ -427,7 +420,7 @@ def score_risk(record: dict) -> DomainScore:
         s = 100
     else:
         s = 60
-    signals.append(SubScore("commitment_signal", win_type, s, 0.25, s * 0.25))
+    signals.append(SubScore("commitment_signal", win_type, s, 0.45, s * 0.45))
 
     domain_score = sum(sig.weighted for sig in signals)
     return DomainScore(
@@ -482,16 +475,6 @@ def evaluate_overrides(record: dict, raw_score: float) -> tuple[float, list[Over
         ))
         score = min(score, 35)
 
-    # Rule 4 -- Churn risk logged -> cap at 40
-    churn = _get(record, "churn_risks")
-    if churn is not None and str(churn).strip() != "":
-        overrides.append(Override(
-            rule="Churn risk logged",
-            action="cap", threshold=40,
-            reason="Churn risk explicitly logged -- treat as At Risk floor",
-        ))
-        score = min(score, 40)
-
     # Rule 5 -- Late status active -> cap at 45
     late = _get(record, "late_status")
     if late is not None and str(late).strip() != "":
@@ -502,7 +485,7 @@ def evaluate_overrides(record: dict, raw_score: float) -> tuple[float, list[Over
         ))
         score = min(score, 45)
 
-    # Rule 6 -- Auto-renewal + Likely to Win -> floor at 75
+    # Rule 6 (5) -- Auto-renewal + Likely to Win -> floor at 75
     auto_clause = _get(record, "auto_renewal_clause")
     outcome = _get(record, "probable_outcome")
     if auto_clause is True and outcome == "Likely to Win":
