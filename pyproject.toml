@@ -1,0 +1,11 @@
+[project]
+name = "sf-opportunity-health"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "jinja2>=3.1",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]

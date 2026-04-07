@@ -1,0 +1,65 @@
+# Confirmed Salesforce API fields — org audit April 2026
+# SOURCE OF TRUTH for all field names in this project.
+# Do not add fields that are not confirmed in this Salesforce org.
+
+weights:
+  engagement:  0.35   # CRM status, activity, follow-up discipline
+  renewal:     0.30   # Renewal timing, stage, auto-renewal protection
+  commercial:  0.20   # ARR movement, success tier, deal value
+  risk:        0.15   # Explicit risk flags and status signals
+
+field_map:
+  # --- Engagement signals ---
+  opportunity_status:        Opportunity_Status__c          # On Track | Warning | Attention Required
+  probable_outcome:          Probable_Outcome__c            # Likely to Win | Likely to Churn | Undetermined
+  churn_risks:               Churn_Risks__c                 # free text: Unresponsive | etc.
+  last_activity_date:        LastActivityDate               # standard date field
+  next_follow_up_date:       Next_Follow_Up_Date__c         # date — nullable
+
+  # --- Renewal signals ---
+  renewal_date:              Renewal_Date__c                # date (Term End Date)
+  stage_name:                StageName                      # standard pipeline stage
+  auto_renewal_clause:       CurrentContractHasAutoRenewalClause__c
+  auto_renewed_last_term:    Auto_Renewed_Last_Term__c      # bool — nullable
+  opportunity_term:          Opportunity_Term__c            # int months
+
+  # --- Commercial signals ---
+  arr:                       ARR__c                         # float USD
+  arr_increase_pct:          ARR_Increase__c                # float — % change (0 = flat)
+  success_level:             Success_Level__c               # Standard | Premium | etc.
+  current_success_level:     Current_Success_Level__c
+  high_value_opp:            High_Value_Opp__c              # bool — nullable
+
+  # --- Risk signals ---
+  late_status:               Late_Status__c                 # str — nullable
+  win_type:                  Win_Type__c                    # Quote Signed | etc.
+  opportunity_status_notes:  Opportunity_Status_Notes__c    # text narrative
+  opportunity_report:        Opportunity_Report__c          # AI-generated narrative
+
+  # --- Standard / relational (display only — not scored) ---
+  opportunity_id:            Id
+  opportunity_name:          Name
+  owner_name:                Owner.Name
+  account_name:              Account.Name
+  amount:                    Amount
+  close_date:                CloseDate
+  product:                   Product__c
+
+status_values:
+  - "On Track"
+  - "Warning"
+  - "Attention Required"
+
+outcome_values:
+  - "Likely to Win"
+  - "Likely to Churn"
+  - "Undetermined"
+
+stage_order:
+  - Outreach
+  - Engaged
+  - Proposal
+  - Quote Follow-Up
+  - Finalizing
+  - Closed Won
+  - Closed Lost
