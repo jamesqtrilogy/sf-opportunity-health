@@ -64,6 +64,7 @@ FIELD_MAP = {
     "opportunity_status_notes": "Opportunity_Status_Notes__c",
     "opportunity_report":       "Opportunity_Report__c",
     "account_report":           "Account.Account_Report__c",
+    "support_tickets_summary":  "Account.Support_Tickets_Summary__c",
 }
 
 
@@ -457,6 +458,114 @@ def score_opportunity_report(report_text: str) -> tuple[float, dict]:
     return _clamp(composite), details
 
 
+def score_support_tickets(summary_text: str) -> tuple[float, dict]:
+    """
+    Score the Account.Support_Tickets_Summary__c field.
+
+    Parses support ticket information to assess support health:
+    - Open tickets count (fewer = better)
+    - P1/Critical tickets (any = bad)
+    - Resolution times
+    - Recent ticket volume
+    - Customer sentiment indicators
+
+    Returns (score 0-100, details dict).
+    """
+    if not summary_text or not isinstance(summary_text, str):
+        return 70.0, {"parsed": False, "reason": "empty or missing support summary"}
+
+    text_lower = summary_text.lower()
+    details = {"parsed": True}
+
+    # === PARSE KEY METRICS ===
+
+    # Count open tickets (look for patterns like "X open", "open: X", "X active")
+    import re
+    open_match = re.search(r'(\d+)\s*(?:open|active|pending)', text_lower)
+    open_tickets = int(open_match.group(1)) if open_match else 0
+    details["open_tickets"] = open_tickets
+
+    # Check for P1/Critical/Urgent tickets
+    has_critical = any(term in text_lower for term in [
+        'p1', 'critical', 'urgent', 'severity 1', 'sev1', 'high priority',
+        'escalat', 'outage', 'down', 'blocker'
+    ])
+    details["has_critical"] = has_critical
+
+    # Check for P2/High priority
+    has_high = any(term in text_lower for term in [
+        'p2', 'high', 'severity 2', 'sev2'
+    ]) and not has_critical
+    details["has_high_priority"] = has_high
+
+    # Look for resolution time indicators
+    slow_resolution = any(term in text_lower for term in [
+        'overdue', 'sla breach', 'sla miss', 'delayed', 'waiting',
+        'pending for', 'no response', 'unresolved'
+    ])
+    details["slow_resolution"] = slow_resolution
+
+    # Look for positive indicators
+    positive_indicators = sum([
+        'all resolved' in text_lower or 'no open' in text_lower or 'zero open' in text_lower,
+        'satisfied' in text_lower or 'positive feedback' in text_lower,
+        'quick resolution' in text_lower or 'fast response' in text_lower,
+        'no tickets' in text_lower or 'no active' in text_lower,
+    ])
+    details["positive_indicators"] = positive_indicators
+
+    # Look for negative sentiment
+    negative_indicators = sum([
+        'frustrated' in text_lower or 'unhappy' in text_lower or 'angry' in text_lower,
+        'complaint' in text_lower or 'escalat' in text_lower,
+        'repeat' in text_lower or 'recurring' in text_lower,
+        'dissatisfied' in text_lower or 'poor' in text_lower,
+    ])
+    details["negative_indicators"] = negative_indicators
+
+    # Count total tickets mentioned
+    total_match = re.search(r'(\d+)\s*(?:total|tickets|cases)', text_lower)
+    total_tickets = int(total_match.group(1)) if total_match else None
+    details["total_tickets"] = total_tickets
+
+    # === CALCULATE SCORE ===
+
+    # Start at 80 (healthy baseline)
+    score = 80.0
+
+    # Deduct for open tickets
+    if open_tickets == 0:
+        score += 10  # Bonus for no open tickets
+    elif open_tickets <= 2:
+        score -= 5
+    elif open_tickets <= 5:
+        score -= 15
+    elif open_tickets <= 10:
+        score -= 25
+    else:
+        score -= 40  # Many open tickets
+
+    # Critical tickets are severe
+    if has_critical:
+        score -= 30
+
+    # High priority tickets
+    if has_high:
+        score -= 15
+
+    # Slow resolution
+    if slow_resolution:
+        score -= 15
+
+    # Sentiment adjustments
+    score += positive_indicators * 5
+    score -= negative_indicators * 10
+
+    details["calculated_score"] = round(score, 1)
+
+    return _clamp(score), details
+
+
 # ============================================================
 # 4. DOMAIN SCORERS
 # ============================================================
@@ -641,20 +750,20 @@ def score_commercial(record: dict) -> DomainScore:
 def score_risk(record: dict) -> DomainScore:
     """Score Risk signals (15% of composite).
 
-    Signals: late_payment_status, commitment_signal, opportunity_report.
+    Signals: late_payment_status, commitment_signal, report_analysis, support_tickets.
     (Churn_Risks__c is retained for display only — not scored.)
     """
     signals: list[SubScore] = []
 
-    # 4.4a -- Late payment status (35%)
+    # 4.4a -- Late payment status (25%)
     late = _get(record, "late_status")
     if late is None or str(late).strip() == "":
         s = 100
     else:
         s = 0
-    signals.append(SubScore("late_payment_status", late, s, 0.35, s * 0.35))
+    signals.append(SubScore("late_payment_status", late, s, 0.25, s * 0.25))
 
-    # 4.4b -- Commitment signal (30%)
+    # 4.4b -- Commitment signal (20%)
     win_type = _get(record, "win_type")
     if win_type is None:
         s = 40
@@ -662,19 +771,26 @@ def score_risk(record: dict) -> DomainScore:
         s = 100
     else:
         s = 60
-    signals.append(SubScore("commitment_signal", win_type, s, 0.30, s * 0.30))
+    signals.append(SubScore("commitment_signal", win_type, s, 0.20, s * 0.20))
 
-    # 4.4c -- Opportunity/Account report analysis (35%)
-    # Try Opportunity_Report__c first, fall back to Account.Account_Report__c
+    # 4.4c -- Opportunity/Account report analysis (30%)
     report_text = _get(record, "opportunity_report")
     if not report_text:
-        # Handle nested Account.Account_Report__c
         account = record.get("Account", {})
         if isinstance(account, dict):
             report_text = account.get("Account_Report__c")
     report_score, _ = score_opportunity_report(report_text)
     has_report = report_text is not None and len(str(report_text).strip()) > 0
-    signals.append(SubScore("report_analysis", has_report, report_score, 0.35, report_score * 0.35))
+    signals.append(SubScore("report_analysis", has_report, report_score, 0.30, report_score * 0.30))
+
+    # 4.4d -- Support tickets analysis (25%)
+    support_text = None
+    account = record.get("Account", {})
+    if isinstance(account, dict):
+        support_text = account.get("Support_Tickets_Summary__c")
+    support_score, _ = score_support_tickets(support_text)
+    has_support = support_text is not None and len(str(support_text).strip()) > 0
+    signals.append(SubScore("support_tickets", has_support, support_score, 0.25, support_score * 0.25))
 
     domain_score = sum(sig.weighted for sig in signals)
     return DomainScore(

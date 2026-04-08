@@ -10,7 +10,7 @@ import json
 import os
 from datetime import datetime
 
-# Confirmed SOQL -- 23 fields only
+# Confirmed SOQL -- 24 fields only
 SOQL = """
 SELECT
   Id,
@@ -18,6 +18,7 @@ SELECT
   Owner.Name,
   Account.Name,
   Account.Account_Report__c,
+  Account.Support_Tickets_Summary__c,
   Amount,
   StageName,
   LastActivityDate,
