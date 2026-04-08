@@ -45,6 +45,7 @@ FIELD_MAP = {
     "churn_risks":              "Churn_Risks__c",
     "last_activity_date":       "LastActivityDate",
     "next_follow_up_date":      "Next_Follow_Up_Date__c",
+    "last_portal_activity":     "Last_Self_Serve_Portal_Activity__c",
 
     # Renewal signals
     "renewal_date":             "Renewal_Date__c",
@@ -464,11 +465,11 @@ def score_engagement(record: dict) -> DomainScore:
     """Score Engagement signals (35% of composite).
 
     Signals: opportunity_status, probable_outcome, activity_recency,
-             follow_up_discipline.
+             follow_up_discipline, portal_activity.
     """
     signals: list[SubScore] = []
 
-    # 4.1a -- Opportunity status (35%)
+    # 4.1a -- Opportunity status (30%)
     status = _get(record, "opportunity_status")
     if status == "On Track":
         s = 100
@@ -478,9 +479,9 @@ def score_engagement(record: dict) -> DomainScore:
         s = 0
     else:
         s = 50
-    signals.append(SubScore("opportunity_status", status, s, 0.35, s * 0.35))
+    signals.append(SubScore("opportunity_status", status, s, 0.30, s * 0.30))
 
-    # 4.1b -- Probable outcome (30%)
+    # 4.1b -- Probable outcome (25%)
     outcome = _get(record, "probable_outcome")
     if outcome == "Likely to Win":
         s = 100
@@ -490,7 +491,7 @@ def score_engagement(record: dict) -> DomainScore:
         s = 0
     else:
         s = 50
-    signals.append(SubScore("probable_outcome", outcome, s, 0.30, s * 0.30))
+    signals.append(SubScore("probable_outcome", outcome, s, 0.25, s * 0.25))
 
     # 4.1c -- Activity recency (20%)
     days = _days_since(_get(record, "last_activity_date"))
@@ -521,6 +522,20 @@ def score_engagement(record: dict) -> DomainScore:
             # Zero or positive = today or overdue
             s = 10
     signals.append(SubScore("follow_up_discipline", follow_up, s, 0.15, s * 0.15))
+
+    # 4.1e -- Self-serve portal activity (10%) - positive signal
+    portal_days = _days_since(_get(record, "last_portal_activity"))
+    if portal_days is None:
+        s = 40  # No data = neutral-low
+    elif portal_days <= 7:
+        s = 100  # Active in last week
+    elif portal_days <= 30:
+        s = 80   # Active in last month
+    elif portal_days <= 90:
+        s = 60   # Active in last quarter
+    else:
+        s = 30   # Stale
+    signals.append(SubScore("portal_activity", portal_days, s, 0.10, s * 0.10))
 
     domain_score = sum(sig.weighted for sig in signals)
     return DomainScore(

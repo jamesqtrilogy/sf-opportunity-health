@@ -10,7 +10,7 @@ import json
 import os
 from datetime import datetime
 
-# Confirmed SOQL -- 22 fields only
+# Confirmed SOQL -- 23 fields only
 SOQL = """
 SELECT
   Id,
@@ -28,6 +28,7 @@ SELECT
   Renewal_Date__c,
   Opportunity_Term__c,
   Next_Follow_Up_Date__c,
+  Last_Self_Serve_Portal_Activity__c,
   Current_Success_Level__c,
   Auto_Renewed_Last_Term__c,
   Product__c,
