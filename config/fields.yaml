@@ -19,14 +19,11 @@ field_map:
   # --- Renewal signals ---
   renewal_date:              Renewal_Date__c                # date (Term End Date)
   stage_name:                StageName                      # standard pipeline stage
-  auto_renewal_clause:       CurrentContractHasAutoRenewalClause__c
   auto_renewed_last_term:    Auto_Renewed_Last_Term__c      # bool — nullable
   opportunity_term:          Opportunity_Term__c            # int months
 
   # --- Commercial signals ---
   arr:                       ARR__c                         # float USD
-  arr_increase_pct:          ARR_Increase__c                # float — % change (0 = flat)
-  success_level:             Success_Level__c               # Standard | Premium | etc.
   current_success_level:     Current_Success_Level__c
   high_value_opp:            High_Value_Opp__c              # bool — nullable
 
@@ -42,7 +39,6 @@ field_map:
   owner_name:                Owner.Name
   account_name:              Account.Name
   amount:                    Amount
-  close_date:                CloseDate
   product:                   Product__c
 
 status_values:

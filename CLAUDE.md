@@ -32,8 +32,8 @@ scripts/run_analysis.py
 | Engagement | 35%    | score_engagement()  | Opportunity_Status__c, Probable_Outcome__c,          |
 |            |        |                     | LastActivityDate, Next_Follow_Up_Date__c              |
 | Renewal    | 30%    | score_renewal()     | Renewal_Date__c, StageName,                          |
-|            |        |                     | CurrentContractHasAutoRenewalClause__c                |
-| Commercial | 20%    | score_commercial()  | ARR_Increase__c, Success_Level__c, High_Value_Opp__c |
+|            |        |                     | Auto_Renewed_Last_Term__c                             |
+| Commercial | 20%    | score_commercial()  | High_Value_Opp__c                                    |
 | Risk       | 15%    | score_risk()        | Churn_Risks__c, Late_Status__c, Win_Type__c          |
 
 ## Score bands
@@ -45,12 +45,10 @@ scripts/run_analysis.py
 1. StageName == "Closed Lost"                    → set to 5
 2. Renewal_Date__c < today                       → cap at 30
 3. Opportunity_Status__c == "Attention Required" → cap at 35
-4. Churn_Risks__c is non-empty                   → cap at 40
-5. Late_Status__c is non-empty                   → cap at 45
-6. auto_renewal_clause True + Likely to Win       → floor at 75
+4. Late_Status__c is non-empty                   → cap at 45
 
 ## Confirmed Salesforce fields
-See config/fields.yaml — 19 custom fields + 6 standard/relational = 25 total.
+See config/fields.yaml — 16 custom fields + 5 standard/relational = 21 total.
 No external system fields (Kayako, NetSuite, Legal) are in scope.
 
 ## Output file conventions

@@ -49,14 +49,11 @@ FIELD_MAP = {
     # Renewal signals
     "renewal_date":             "Renewal_Date__c",
     "stage_name":               "StageName",
-    "auto_renewal_clause":      "CurrentContractHasAutoRenewalClause__c",
     "auto_renewed_last_term":   "Auto_Renewed_Last_Term__c",
     "opportunity_term":         "Opportunity_Term__c",
 
     # Commercial signals
     "arr":                      "ARR__c",
-    "arr_increase_pct":         "ARR_Increase__c",
-    "success_level":            "Success_Level__c",
     "current_success_level":    "Current_Success_Level__c",
     "high_value_opp":           "High_Value_Opp__c",
 
@@ -268,12 +265,11 @@ def score_engagement(record: dict) -> DomainScore:
 def score_renewal(record: dict) -> DomainScore:
     """Score Renewal signals (30% of composite).
 
-    Signals: days_to_renewal, pipeline_stage, auto_renewal_clause,
-             auto_renewed_history.
+    Signals: days_to_renewal, pipeline_stage, auto_renewed_history.
     """
     signals: list[SubScore] = []
 
-    # 4.2a -- Days to renewal (35%)
+    # 4.2a -- Days to renewal (45%)
     renewal_raw = _get(record, "renewal_date")
     days_ago = _days_since(renewal_raw)  # positive = past (overdue)
     if days_ago is None:
@@ -293,9 +289,9 @@ def score_renewal(record: dict) -> DomainScore:
             s = 80
         else:
             s = 100
-    signals.append(SubScore("days_to_renewal", days_to_renewal_val, s, 0.35, s * 0.35))
+    signals.append(SubScore("days_to_renewal", days_to_renewal_val, s, 0.45, s * 0.45))
 
-    # 4.2b -- Pipeline stage (30%)
+    # 4.2b -- Pipeline stage (35%)
     stage = _get(record, "stage_name")
     stage_scores = {
         "Closed Won":     100,
@@ -307,19 +303,9 @@ def score_renewal(record: dict) -> DomainScore:
         "Closed Lost":      0,
     }
     s = stage_scores.get(stage, 40) if stage else 40
-    signals.append(SubScore("pipeline_stage", stage, s, 0.30, s * 0.30))
+    signals.append(SubScore("pipeline_stage", stage, s, 0.35, s * 0.35))
 
-    # 4.2c -- Auto renewal clause (20%)
-    auto_clause = _get(record, "auto_renewal_clause")
-    if auto_clause is True:
-        s = 100
-    elif auto_clause is False:
-        s = 20
-    else:
-        s = 50
-    signals.append(SubScore("auto_renewal_clause", auto_clause, s, 0.20, s * 0.20))
-
-    # 4.2d -- Auto renewed last term (15%)
+    # 4.2c -- Auto renewed last term (20%)
     auto_history = _get(record, "auto_renewed_last_term")
     if auto_history is True:
         s = 100
@@ -327,7 +313,7 @@ def score_renewal(record: dict) -> DomainScore:
         s = 40
     else:
         s = 60
-    signals.append(SubScore("auto_renewed_history", auto_history, s, 0.15, s * 0.15))
+    signals.append(SubScore("auto_renewed_history", auto_history, s, 0.20, s * 0.20))
 
     domain_score = sum(sig.weighted for sig in signals)
     return DomainScore(
@@ -343,47 +329,17 @@ def score_renewal(record: dict) -> DomainScore:
 def score_commercial(record: dict) -> DomainScore:
     """Score Commercial signals (20% of composite).
 
-    Signals: arr_expansion, success_tier, high_value_flag.
+    Signals: high_value_flag.
     """
     signals: list[SubScore] = []
 
-    # 4.3a -- ARR expansion (40%)
-    arr_pct = _get(record, "arr_increase_pct")
-    if arr_pct is None:
-        s = 60
-    elif arr_pct > 10:
-        s = 100
-    elif arr_pct >= 1:
-        s = 80
-    elif arr_pct == 0:
-        s = 60
-    elif arr_pct >= -10:
-        s = 30
-    else:
-        s = 0
-    signals.append(SubScore("arr_expansion", arr_pct, s, 0.40, s * 0.40))
-
-    # 4.3b -- Success tier (35%)
-    tier = _get(record, "success_level")
-    if tier is None:
-        s = 40
-    else:
-        tier_l = str(tier).lower()
-        if any(kw in tier_l for kw in ("premium", "elite", "enterprise", "platinum")):
-            s = 100
-        elif tier_l == "standard":
-            s = 60
-        else:
-            s = 40
-    signals.append(SubScore("success_tier", tier, s, 0.35, s * 0.35))
-
-    # 4.3c -- High value flag (25%)
+    # 4.3a -- High value flag (100%)
     hv = _get(record, "high_value_opp")
     if hv is True:
         s = 100
     else:
         s = 60   # False and null both score 60
-    signals.append(SubScore("high_value_flag", hv, s, 0.25, s * 0.25))
+    signals.append(SubScore("high_value_flag", hv, s, 1.00, s * 1.00))
 
     domain_score = sum(sig.weighted for sig in signals)
     return DomainScore(
@@ -484,17 +440,6 @@ def evaluate_overrides(record: dict, raw_score: float) -> tuple[float, list[Over
             reason="Late payment status is an existential retention risk",
         ))
         score = min(score, 45)
-
-    # Rule 6 (5) -- Auto-renewal + Likely to Win -> floor at 75
-    auto_clause = _get(record, "auto_renewal_clause")
-    outcome = _get(record, "probable_outcome")
-    if auto_clause is True and outcome == "Likely to Win":
-        overrides.append(Override(
-            rule="Auto-renewal + Likely to Win",
-            action="floor", threshold=75,
-            reason="Contracted commitment with positive outcome -- should not appear at risk",
-        ))
-        score = max(score, 75)
 
     return score, overrides
 

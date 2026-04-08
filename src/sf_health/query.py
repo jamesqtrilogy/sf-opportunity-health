@@ -1,7 +1,7 @@
 """
 query.py -- Salesforce MCP query and raw export utilities.
 
-Queries ONLY the 25 confirmed fields for this Salesforce org.
+Queries ONLY the 21 confirmed fields for this Salesforce org.
 Do not add fields not listed in config/fields.yaml.
 """
 
@@ -10,7 +10,7 @@ import json
 import os
 from datetime import datetime
 
-# Confirmed SOQL -- 25 fields only
+# Confirmed SOQL -- 21 fields only
 SOQL = """
 SELECT
   Id,
@@ -19,19 +19,15 @@ SELECT
   Account.Name,
   Amount,
   StageName,
-  CloseDate,
   LastActivityDate,
   Opportunity_Status__c,
   Probable_Outcome__c,
   Churn_Risks__c,
   ARR__c,
-  ARR_Increase__c,
   Renewal_Date__c,
   Opportunity_Term__c,
   Next_Follow_Up_Date__c,
-  Success_Level__c,
   Current_Success_Level__c,
-  CurrentContractHasAutoRenewalClause__c,
   Auto_Renewed_Last_Term__c,
   Product__c,
   Late_Status__c,
