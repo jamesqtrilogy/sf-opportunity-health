@@ -34,7 +34,7 @@ scripts/run_analysis.py
 | Renewal    | 30%    | score_renewal()     | Renewal_Date__c, StageName,                          |
 |            |        |                     | Auto_Renewed_Last_Term__c                             |
 | Commercial | 20%    | score_commercial()  | High_Value_Opp__c                                    |
-| Risk       | 15%    | score_risk()        | Churn_Risks__c, Late_Status__c, Win_Type__c          |
+| Risk       | 15%    | score_risk()        | Late_Status__c, Win_Type__c, Opportunity_Report__c   |
 
 ## Score bands
 - Healthy  80–100  → quarterly check-in; focus on expansion

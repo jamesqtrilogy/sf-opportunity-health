@@ -185,6 +185,143 @@ def apply_time_decay(score: float, last_updated: Any,
     return score * decay_multiplier
 
 
+def _parse_report_sections(report_text: str) -> dict[str, str]:
+    """Parse Opportunity_Report__c markdown into sections by ### headers."""
+    if not report_text or not isinstance(report_text, str):
+        return {}
+
+    sections = {}
+    current_section = None
+    current_content = []
+
+    for line in report_text.split('\n'):
+        if line.strip().startswith('###'):
+            if current_section:
+                sections[current_section] = '\n'.join(current_content).strip()
+            current_section = line.strip().lstrip('#').strip()
+            current_content = []
+        elif current_section:
+            current_content.append(line)
+
+    if current_section:
+        sections[current_section] = '\n'.join(current_content).strip()
+
+    return sections
+
+
+def _count_bullet_items(text: str) -> int:
+    """Count bullet points (-, *, •) in text."""
+    if not text:
+        return 0
+    count = 0
+    for line in text.split('\n'):
+        stripped = line.strip()
+        if stripped.startswith(('-', '*', '•')) and len(stripped) > 1:
+            count += 1
+    return count
+
+
+def _parse_categorical_value(text: str, mapping: dict[str, int], default: int = 50) -> int:
+    """Extract a categorical value from section text and map to score."""
+    if not text:
+        return default
+    text_lower = text.lower().strip()
+    for key, score in mapping.items():
+        if key.lower() in text_lower:
+            return score
+    return default
+
+
+def score_opportunity_report(report_text: str) -> tuple[float, dict]:
+    """
+    Score the Opportunity_Report__c markdown field.
+
+    Returns (score 0-100, details dict with section breakdown).
+    """
+    sections = _parse_report_sections(report_text)
+
+    if not sections:
+        return 50.0, {"parsed": False, "reason": "empty or missing report"}
+
+    details = {"parsed": True, "sections_found": list(sections.keys())}
+
+    # Count positive items (higher = better)
+    positive_count = _count_bullet_items(sections.get("Positive Signals", ""))
+    activities_count = _count_bullet_items(sections.get("Opportunity Activities", ""))
+
+    # Count negative items (higher = worse)
+    negative_count = _count_bullet_items(sections.get("Negative Signals", ""))
+    pain_count = _count_bullet_items(sections.get("Pain Points", ""))
+    gaps_count = _count_bullet_items(sections.get("Renewal Process Gaps", ""))
+    risks_count = _count_bullet_items(sections.get("Risks List", ""))
+
+    details["positive_signals"] = positive_count
+    details["activities"] = activities_count
+    details["negative_signals"] = negative_count
+    details["pain_points"] = pain_count
+    details["renewal_gaps"] = gaps_count
+    details["risks"] = risks_count
+
+    # Parse categorical fields
+    status_map = {"on track": 100, "warning": 45, "attention required": 0}
+    outcome_map = {"likely to win": 100, "undetermined": 50, "likely to churn": 0}
+    health_map = {"healthy": 100, "caution": 50, "at risk": 0}
+    confidence_map = {"high": 100, "medium": 60, "low": 20}
+
+    status_score = _parse_categorical_value(sections.get("Opportunity Status", ""), status_map)
+    outcome_score = _parse_categorical_value(sections.get("Probable Outcome", ""), outcome_map)
+    health_score = _parse_categorical_value(sections.get("Engagement Health", ""), health_map)
+    confidence_score = _parse_categorical_value(
+        sections.get("Information Quality and Confidence", ""), confidence_map
+    )
+
+    details["status_score"] = status_score
+    details["outcome_score"] = outcome_score
+    details["health_score"] = health_score
+    details["confidence_score"] = confidence_score
+
+    # Composite scoring:
+    # - Categorical signals (40%): avg of status, outcome, health
+    # - Positive balance (30%): positives vs negatives
+    # - Confidence (15%): information quality
+    # - Activity level (15%): engagement evidence
+
+    categorical_avg = (status_score + outcome_score + health_score) / 3
+
+    total_positive = positive_count + activities_count
+    total_negative = negative_count + pain_count + gaps_count + risks_count
+
+    if total_positive + total_negative == 0:
+        balance_score = 50  # neutral if no items
+    else:
+        # Ratio of positive to total, scaled to 0-100
+        balance_score = (total_positive / (total_positive + total_negative)) * 100
+
+    # Activity score: 0 items = 30, 1-2 = 60, 3+ = 90
+    if activities_count >= 3:
+        activity_score = 90
+    elif activities_count >= 1:
+        activity_score = 60
+    else:
+        activity_score = 30
+
+    composite = (
+        categorical_avg * 0.40 +
+        balance_score * 0.30 +
+        confidence_score * 0.15 +
+        activity_score * 0.15
+    )
+
+    details["composite_breakdown"] = {
+        "categorical": round(categorical_avg, 1),
+        "balance": round(balance_score, 1),
+        "confidence": confidence_score,
+        "activity": activity_score,
+    }
+
+    return _clamp(composite), details
+
+
 # ============================================================
 # 4. DOMAIN SCORERS
 # ============================================================
@@ -355,20 +492,20 @@ def score_commercial(record: dict) -> DomainScore:
 def score_risk(record: dict) -> DomainScore:
     """Score Risk signals (15% of composite).
 
-    Signals: late_payment_status, commitment_signal.
+    Signals: late_payment_status, commitment_signal, opportunity_report.
     (Churn_Risks__c is retained for display only — not scored.)
     """
     signals: list[SubScore] = []
 
-    # 4.4a -- Late payment status (55%)
+    # 4.4a -- Late payment status (35%)
     late = _get(record, "late_status")
     if late is None or str(late).strip() == "":
         s = 100
     else:
         s = 0
-    signals.append(SubScore("late_payment_status", late, s, 0.55, s * 0.55))
+    signals.append(SubScore("late_payment_status", late, s, 0.35, s * 0.35))
 
-    # 4.4b -- Commitment signal (45%)
+    # 4.4b -- Commitment signal (30%)
     win_type = _get(record, "win_type")
     if win_type is None:
         s = 40
@@ -376,7 +513,12 @@ def score_risk(record: dict) -> DomainScore:
         s = 100
     else:
         s = 60
-    signals.append(SubScore("commitment_signal", win_type, s, 0.45, s * 0.45))
+    signals.append(SubScore("commitment_signal", win_type, s, 0.30, s * 0.30))
+
+    # 4.4c -- Opportunity report analysis (35%)
+    report_text = _get(record, "opportunity_report")
+    report_score, _ = score_opportunity_report(report_text)
+    signals.append(SubScore("opportunity_report", report_text is not None, report_score, 0.35, report_score * 0.35))
 
     domain_score = sum(sig.weighted for sig in signals)
     return DomainScore(
