@@ -62,6 +62,7 @@ FIELD_MAP = {
     "win_type":                 "Win_Type__c",
     "opportunity_status_notes": "Opportunity_Status_Notes__c",
     "opportunity_report":       "Opportunity_Report__c",
+    "account_report":           "Account.Account_Report__c",
 }
 
 
@@ -186,25 +187,49 @@ def apply_time_decay(score: float, last_updated: Any,
 
 
 def _parse_report_sections(report_text: str) -> dict[str, str]:
-    """Parse Opportunity_Report__c markdown into sections by ### headers."""
+    """Parse Opportunity_Report__c or Account_Report__c markdown into sections.
+
+    Handles both standard headers (### Section Name) and inline value headers
+    (### Status: Warning, ### Likely Outcome: Churn).
+    """
     if not report_text or not isinstance(report_text, str):
         return {}
 
     sections = {}
     current_section = None
     current_content = []
+    inline_value_section = False  # Track if current section had inline value
 
     for line in report_text.split('\n'):
-        if line.strip().startswith('###'):
-            if current_section:
-                sections[current_section] = '\n'.join(current_content).strip()
-            current_section = line.strip().lstrip('#').strip()
-            current_content = []
+        stripped = line.strip()
+        if stripped.startswith('###'):
+            # Save previous section (only if it wasn't an inline value section)
+            if current_section and not inline_value_section:
+                content = '\n'.join(current_content).strip()
+                if content:  # Only overwrite if there's actual content
+                    sections[current_section] = content
+
+            header = stripped.lstrip('#').strip()
+
+            # Handle inline value headers like "### Status: ⚠️ Warning" or "### Likely Outcome: Churn"
+            if ': ' in header and not header.endswith(':'):
+                key, value = header.split(': ', 1)
+                sections[key] = value  # Store inline value directly
+                current_section = key
+                current_content = []
+                inline_value_section = True
+            else:
+                current_section = header.rstrip(':')  # Remove trailing colon if present
+                current_content = []
+                inline_value_section = False
         elif current_section:
             current_content.append(line)
 
-    if current_section:
-        sections[current_section] = '\n'.join(current_content).strip()
+    # Save final section
+    if current_section and not inline_value_section:
+        content = '\n'.join(current_content).strip()
+        if content:
+            sections[current_section] = content
 
     return sections
 
@@ -232,9 +257,38 @@ def _parse_categorical_value(text: str, mapping: dict[str, int], default: int = 
     return default
 
 
+def _count_table_rows(text: str) -> int:
+    """Count table rows (lines starting with |) excluding header/separator."""
+    if not text:
+        return 0
+    count = 0
+    for line in text.split('\n'):
+        stripped = line.strip()
+        if stripped.startswith('|') and not stripped.startswith('|--') and '---' not in stripped:
+            # Skip header row (usually first row with column names)
+            if count > 0 or '**' in stripped or 'Name' not in stripped:
+                count += 1
+    return max(0, count - 1)  # Subtract header row
+
+
 def score_opportunity_report(report_text: str) -> tuple[float, dict]:
     """
-    Score the Opportunity_Report__c markdown field.
+    Score the Opportunity_Report__c or Account.Account_Report__c markdown field.
+
+    Parses all major sections from Account Reports:
+    - Account Status / Status (categorical: On Track, Warning, Attention Required)
+    - Likely Outcome (categorical: Renewal/Likely to Win, Undetermined, Churn)
+    - Positive Signals (bullet count)
+    - Negative Signals (bullet count)
+    - Pain Points (bullet count, categorized by type)
+    - Churn Risks (bullet count)
+    - Account Activities (engagement evidence)
+    - Key Individuals (contact count)
+    - Recommended Actions (action items count)
+    - Information Quality and Confidence (data quality)
+    - Why Does the Customer Use Our Product Today (product stickiness)
+    - Account Summary (overview presence)
+    - Story We Want to Be Able to Tell (call preparation)
 
     Returns (score 0-100, details dict with section breakdown).
     """
@@ -245,78 +299,158 @@ def score_opportunity_report(report_text: str) -> tuple[float, dict]:
 
     details = {"parsed": True, "sections_found": list(sections.keys())}
 
-    # Count positive items (higher = better)
+    # === COUNT POSITIVE INDICATORS ===
     positive_count = _count_bullet_items(sections.get("Positive Signals", ""))
-    activities_count = _count_bullet_items(sections.get("Opportunity Activities", ""))
 
-    # Count negative items (higher = worse)
+    # Account/Opportunity Activities - engagement evidence
+    activities_text = sections.get("Opportunity Activities", "") or sections.get("Account Activities", "")
+    activities_count = _count_bullet_items(activities_text)
+
+    # Key Individuals - more contacts = better relationship mapping
+    key_individuals = sections.get("Key Individuals", "")
+    contacts_count = _count_table_rows(key_individuals) or _count_bullet_items(key_individuals)
+
+    # Product stickiness - presence indicates clear value proposition
+    has_product_usage = bool(sections.get("Why Does the Customer Use Our Product Today", "").strip())
+
+    # Call preparation - indicates proactive engagement planning
+    has_call_story = bool(sections.get("Story We Want to Be Able to Tell on the Next Customer Call", "").strip())
+
+    # Account Summary presence
+    has_summary = bool(sections.get("Account Summary", "").strip())
+
+    # === COUNT NEGATIVE INDICATORS ===
     negative_count = _count_bullet_items(sections.get("Negative Signals", ""))
-    pain_count = _count_bullet_items(sections.get("Pain Points", ""))
-    gaps_count = _count_bullet_items(sections.get("Renewal Process Gaps", ""))
-    risks_count = _count_bullet_items(sections.get("Risks List", ""))
 
+    # Pain Points - parse by category (Support Issues, Product Issues, etc.)
+    pain_text = sections.get("Pain Points", "")
+    pain_count = _count_bullet_items(pain_text)
+
+    # Renewal Process Gaps
+    gaps_count = _count_bullet_items(sections.get("Renewal Process Gaps", ""))
+
+    # Churn Risks / Risks List
+    risks_text = sections.get("Risks List", "") or sections.get("Churn Risks", "")
+    risks_count = _count_bullet_items(risks_text)
+
+    # Recommended Actions - more actions = more work needed (neutral/slight negative)
+    actions_count = _count_bullet_items(sections.get("Recommended Actions", ""))
+
+    # Store counts in details
     details["positive_signals"] = positive_count
     details["activities"] = activities_count
+    details["contacts"] = contacts_count
+    details["has_product_usage"] = has_product_usage
+    details["has_call_story"] = has_call_story
+    details["has_summary"] = has_summary
     details["negative_signals"] = negative_count
     details["pain_points"] = pain_count
     details["renewal_gaps"] = gaps_count
     details["risks"] = risks_count
+    details["recommended_actions"] = actions_count
 
-    # Parse categorical fields
-    status_map = {"on track": 100, "warning": 45, "attention required": 0}
-    outcome_map = {"likely to win": 100, "undetermined": 50, "likely to churn": 0}
+    # === PARSE CATEGORICAL FIELDS ===
+    # Status values may include emojis (e.g., "⚠️ Warning", "🔴 Attention Required")
+    status_map = {
+        "on track": 100, "✅": 100,
+        "warning": 45, "⚠️": 45,
+        "attention required": 0, "🔴": 0,
+    }
+    outcome_map = {
+        "likely to win": 100, "renewal": 100,
+        "undetermined": 50,
+        "likely to churn": 0, "churn": 0,
+    }
     health_map = {"healthy": 100, "caution": 50, "at risk": 0}
-    confidence_map = {"high": 100, "medium": 60, "low": 20}
+    confidence_map = {"high": 100, "confident": 100, "good": 80, "medium": 60, "low": 20}
 
-    status_score = _parse_categorical_value(sections.get("Opportunity Status", ""), status_map)
-    outcome_score = _parse_categorical_value(sections.get("Probable Outcome", ""), outcome_map)
-    health_score = _parse_categorical_value(sections.get("Engagement Health", ""), health_map)
-    confidence_score = _parse_categorical_value(
-        sections.get("Information Quality and Confidence", ""), confidence_map
+    # Status - check multiple possible section names and inline format
+    status_text = (
+        sections.get("Status", "") or
+        sections.get("Account Status", "") or
+        sections.get("Opportunity Status", "")
     )
+    # Also check Explanation section for status context
+    explanation_text = sections.get("Explanation", "")
+    if not status_text and explanation_text:
+        status_text = explanation_text
+    status_score = _parse_categorical_value(status_text, status_map)
+
+    # Outcome - check multiple formats
+    outcome_text = (
+        sections.get("Likely Outcome", "") or
+        sections.get("Probable Outcome", "")
+    )
+    # Also parse Likely Outcome Explanation for additional context
+    outcome_explanation = sections.get("Likely Outcome Explanation", "")
+    if outcome_explanation and not outcome_text:
+        outcome_text = outcome_explanation
+    outcome_score = _parse_categorical_value(outcome_text, outcome_map)
+
+    # Engagement Health
+    health_score = _parse_categorical_value(sections.get("Engagement Health", ""), health_map)
+
+    # Information Quality and Confidence
+    confidence_text = sections.get("Information Quality and Confidence", "")
+    confidence_score = _parse_categorical_value(confidence_text, confidence_map)
 
     details["status_score"] = status_score
     details["outcome_score"] = outcome_score
     details["health_score"] = health_score
     details["confidence_score"] = confidence_score
 
-    # Composite scoring:
-    # - Categorical signals (40%): avg of status, outcome, health
-    # - Positive balance (30%): positives vs negatives
+    # === COMPOSITE SCORING ===
+    # Weights:
+    # - Categorical signals (35%): status, outcome, health average
+    # - Positive/Negative balance (25%): ratio of positive to total items
     # - Confidence (15%): information quality
-    # - Activity level (15%): engagement evidence
+    # - Engagement depth (15%): activities + contacts
+    # - Preparedness (10%): product usage docs + call story
 
     categorical_avg = (status_score + outcome_score + health_score) / 3
 
+    # Balance score: positive items vs negative items
     total_positive = positive_count + activities_count
     total_negative = negative_count + pain_count + gaps_count + risks_count
 
     if total_positive + total_negative == 0:
-        balance_score = 50  # neutral if no items
+        balance_score = 50
     else:
-        # Ratio of positive to total, scaled to 0-100
         balance_score = (total_positive / (total_positive + total_negative)) * 100
 
-    # Activity score: 0 items = 30, 1-2 = 60, 3+ = 90
-    if activities_count >= 3:
-        activity_score = 90
-    elif activities_count >= 1:
-        activity_score = 60
+    # Engagement depth: activities and contact coverage
+    if activities_count >= 3 and contacts_count >= 3:
+        engagement_score = 100
+    elif activities_count >= 2 or contacts_count >= 3:
+        engagement_score = 75
+    elif activities_count >= 1 or contacts_count >= 1:
+        engagement_score = 50
     else:
-        activity_score = 30
+        engagement_score = 25
+
+    # Preparedness: documentation quality
+    preparedness_score = 0
+    if has_product_usage:
+        preparedness_score += 50
+    if has_call_story:
+        preparedness_score += 30
+    if has_summary:
+        preparedness_score += 20
 
     composite = (
-        categorical_avg * 0.40 +
-        balance_score * 0.30 +
+        categorical_avg * 0.35 +
+        balance_score * 0.25 +
         confidence_score * 0.15 +
-        activity_score * 0.15
+        engagement_score * 0.15 +
+        preparedness_score * 0.10
     )
 
     details["composite_breakdown"] = {
         "categorical": round(categorical_avg, 1),
         "balance": round(balance_score, 1),
         "confidence": confidence_score,
-        "activity": activity_score,
+        "engagement": engagement_score,
+        "preparedness": preparedness_score,
     }
 
     return _clamp(composite), details
@@ -515,10 +649,17 @@ def score_risk(record: dict) -> DomainScore:
         s = 60
     signals.append(SubScore("commitment_signal", win_type, s, 0.30, s * 0.30))
 
-    # 4.4c -- Opportunity report analysis (35%)
+    # 4.4c -- Opportunity/Account report analysis (35%)
+    # Try Opportunity_Report__c first, fall back to Account.Account_Report__c
     report_text = _get(record, "opportunity_report")
+    if not report_text:
+        # Handle nested Account.Account_Report__c
+        account = record.get("Account", {})
+        if isinstance(account, dict):
+            report_text = account.get("Account_Report__c")
     report_score, _ = score_opportunity_report(report_text)
-    signals.append(SubScore("opportunity_report", report_text is not None, report_score, 0.35, report_score * 0.35))
+    has_report = report_text is not None and len(str(report_text).strip()) > 0
+    signals.append(SubScore("report_analysis", has_report, report_score, 0.35, report_score * 0.35))
 
     domain_score = sum(sig.weighted for sig in signals)
     return DomainScore(
